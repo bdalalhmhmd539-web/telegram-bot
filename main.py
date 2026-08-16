@@ -1,7 +1,6 @@
 import os
 import yt_dlp
 import asyncio
-from aiohttp import web
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -12,30 +11,16 @@ from telegram.ext import (
     ContextTypes
 )
 
-# ==================== إعدادات الإدارة والدفع ====================
+# ==================== الإعدادات الثابتة ====================
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 ADMIN_USERNAME = "@bdalalhm"
-ADMIN_ID = 7752459  # آيدي المدير لترقية المستخدمين
+ADMIN_ID = 7752459
 
 BANKAK_ACCOUNT = "7752459"
 BANKAK_NAME = "محمد عبد الإله"
 BANKAK_PRICE = "2000 جنيه سوداني"
 
 VIP_USERS = set()
-
-# ==================== خادم ويب مصغر لإرضاء Render ====================
-async def handle_ping(request):
-    return web.Response(text="Bot is running perfectly!")
-
-async def start_web_server():
-    app = web.Application()
-    app.router.add_get('/', handle_ping)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    port = int(os.environ.get('PORT', 8080))
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
-    print(f"🌐 Web server running on port {port}")
 
 # ==================== الأوامر والرسائل ====================
 
@@ -100,7 +85,6 @@ async def download_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE, 
             'no_warnings': True,
         }
 
-        # تشغيل yt_dlp بطريقة غير معطلة (Non-blocking)
         loop = asyncio.get_event_loop()
         def download_process():
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -200,17 +184,12 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ==================== التشغيل الرئيسي ====================
 
-async def post_init(application):
-    # تشغيل خادم الويب عند بدء البوت بشكل آمن
-    await start_web_server()
-
 def main():
     if not os.path.exists("downloads"):
         os.makedirs("downloads")
 
-    app_bot = ApplicationBuilder().token(BOT_TOKEN).post_init(post_init).build()
+    app_bot = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # تسجيل الأوامر
     app_bot.add_handler(CommandHandler("start", start))
     app_bot.add_handler(CommandHandler("addvip", add_vip))
     app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
@@ -221,4 +200,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
