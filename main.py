@@ -17,7 +17,7 @@ from telegram.ext import (
 # ==================== الإعدادات الثابتة ====================
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 ADMIN_USERNAME = "@bdalalhm"
-ADMIN_ID = 7752459  # آيدي الأدمن لتلقي الإشعارات
+ADMIN_ID = 8328994103  # آيدي الأدمن لتلقي الإشعارات
 
 BANKAK_ACCOUNT = "7752459"
 BANKAK_NAME = "محمد عبد الإله"
