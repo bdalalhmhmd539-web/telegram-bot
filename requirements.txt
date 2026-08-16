@@ -2,5 +2,4 @@ python-telegram-bot==20.3
 yt-dlp
 httpx==0.24.1
 httpcore==0.17.3
-Flask==2.3.3
-
+aiohttp
