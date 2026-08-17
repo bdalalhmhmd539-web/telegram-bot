@@ -5,20 +5,18 @@ import asyncio
 import subprocess
 import sys
 from datetime import datetime, timedelta
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, LabeledPrice
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, Update
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
-    PreCheckoutQueryHandler,
     filters,
     ContextTypes
 )
 
 # ==================== التحديث التلقائي للمكتبات ====================
 def update_ytdlp():
-    """تحديث مكتبة yt-dlp تلقائياً عند كل تشغيل للبوت لضمان عدم توقف الخدمات"""
     try:
         print("🔄 جاري فحص وتحديث مكتبة yt-dlp تلقائياً لأحدث إصدار...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade", "yt-dlp"])
@@ -36,6 +34,34 @@ BANKAK_NAME = "محمد عبد الإله"
 BANKAK_PRICE = "2000 جنيه سوداني"
 
 STARS_PRICE = 50 
+
+# ==================== إدارة ملف جميع المستخدمين ====================
+ALL_USERS_FILE = "all_users.json"
+
+def load_all_users() -> dict:
+    if os.path.exists(ALL_USERS_FILE):
+        try:
+            with open(ALL_USERS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_all_users(users_dict: dict):
+    with open(ALL_USERS_FILE, "w", encoding="utf-8") as f:
+        json.dump(users_dict, f, indent=4, ensure_ascii=False)
+
+ALL_USERS = load_all_users()
+
+def register_user(user):
+    str_id = str(user.id)
+    if str_id not in ALL_USERS:
+        ALL_USERS[str_id] = {
+            "name": user.first_name,
+            "username": f"@{user.username}" if user.username else "بدون يوزر",
+            "joined_date": datetime.now().strftime("%Y-%m-%d %H:%M")
+        }
+        save_all_users(ALL_USERS)
 
 # ==================== إدارة بيانات الـ VIP ====================
 VIP_FILE = "vip_users.json"
@@ -89,14 +115,14 @@ def activate_vip_for_days(user_id: int, days: int = 30):
 # ==================== الأوامر والرسائل ====================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    user_name = update.effective_user.first_name
+    user = update.effective_user
+    register_user(user)
     
-    is_vip = is_vip_active(user_id)
+    is_vip = is_vip_active(user.id)
     vip_status = "👑 **أنت مشترك في VIP حالياً!**" if is_vip else "⚡ **النسخة المجانية:** (تنزيل عادي حتى 30MB)"
 
     welcome_text = (
-        f"أهلاً بك يا {user_name} في بوت تنزيل الفيديوهات السريع! 🚀\n\n"
+        f"أهلاً بك يا {user.first_name} في بوت تنزيل الفيديوهات السريع! 🚀\n\n"
         f"الحالة: {vip_status}\n\n"
         "🎬 **كيفية الاستخدام:**\n"
         "أرسل لي رابط فيديو من (TikTok, Instagram, YouTube, Facebook...) وسأقوم بتحميله لك فوراً.\n\n"
@@ -104,19 +130,82 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "هذا البوت أداة تقنية مخصصة للتنزيل فقط، ويتحمل المستخدم وحده المسؤولية الشرعية والقانونية عن نوعية المحتوى الذي يقوم بتحميله."
     )
     
-    keyboard = []
+    inline_keyboard = []
     if not is_vip:
-        keyboard.append([InlineKeyboardButton("👑 الاشتراك في VIP", callback_data="vip_info")])
-        keyboard.append([InlineKeyboardButton("🏦 التحويل بي بنكك", callback_data="bankak_info")])
+        inline_keyboard.append([InlineKeyboardButton("👑 الاشتراك في VIP", callback_data="vip_info")])
+        inline_keyboard.append([InlineKeyboardButton("🏦 التحويل بي بنكك", callback_data="bankak_info")])
     
-    keyboard.append([InlineKeyboardButton("💬 الدعم والمساعدة", url=f"https://t.me/{ADMIN_USERNAME.replace('@', '')}")])
+    inline_keyboard.append([InlineKeyboardButton("💬 الدعم والمساعدة", url=f"https://t.me/{ADMIN_USERNAME.replace('@', '')}")])
     
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(welcome_text, parse_mode="Markdown", reply_markup=reply_markup)
+    # إضافة أزرار الكيبورد الثابتة في أسفل الشاشة للأدمن فقط
+    reply_markup_keyboard = None
+    if user.id == ADMIN_ID:
+        admin_keyboard = [
+            [KeyboardButton("📊 الإحصائيات والتقدم"), KeyboardButton("📋 قائمة المشتركين")]
+        ]
+        reply_markup_keyboard = ReplyKeyboardMarkup(admin_keyboard, resize_keyboard=True)
+
+    await update.message.reply_text(welcome_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(inline_keyboard))
+    
+    if reply_markup_keyboard:
+        await update.message.reply_text("👑 **مرحباً بك يا مدير! تم تفعيل أزرار لوحة التحكم الثابتة في الكيبورد بالأسفل.**", reply_markup=reply_markup_keyboard)
+
+# معالجة نصوص أزرار الكيبورد الثابتة للأدمن
+async def handle_admin_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    user_id = update.effective_user.id
+    
+    if user_id != ADMIN_ID:
+        return False
+
+    if text == "📊 الإحصائيات والتقدم":
+        await stats(update, context)
+        return True
+    elif text == "📋 قائمة المشتركين":
+        await list_users(update, context)
+        return True
+        
+    return False
+
+# أمر معرفة التقدم والإحصائيات الكلية
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    
+    total_users = len(ALL_USERS)
+    vip_count = len(VIP_USERS)
+    free_users = total_users - vip_count
+    
+    report = (
+        "📊 **تقرير تقدم وانتشار البوت:**\n\n"
+        f"👥 **إجمالي المشتركين الكلي:** `{total_users}` شخص\n"
+        f"👑 **عدد مشتركي VIP:** `{vip_count}`\n"
+        f"🆓 **عدد مستخدمي المجاني:** `{free_users}`"
+    )
+    await update.message.reply_text(report, parse_mode="Markdown")
+
+# أمر استخراج قائمة بكل المستخدمين
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    
+    if not ALL_USERS:
+        await update.message.reply_text("لا يوجد مستخدمون مسجلون بعد.")
+        return
+
+    text = "📋 **قائمة المشتركين في البوت:**\n\n"
+    for uid, data in ALL_USERS.items():
+        vip_tag = " [👑 VIP]" if is_vip_active(int(uid)) else ""
+        text += f"• {data['name']} ({data['username']}) - `{uid}`{vip_tag}\n"
+    
+    if len(text) > 4000:
+        for i in range(0, len(text), 4000):
+            await update.message.reply_text(text[i:i+4000], parse_mode="Markdown")
+    else:
+        await update.message.reply_text(text, parse_mode="Markdown")
 
 async def add_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id != ADMIN_ID:
+    if update.effective_user.id != ADMIN_ID:
         return
 
     try:
@@ -135,8 +224,7 @@ async def add_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ طريقة الاستخدام: `/addvip 123456789`", parse_mode="Markdown")
 
 async def del_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id != ADMIN_ID:
+    if update.effective_user.id != ADMIN_ID:
         return
     try:
         remove_id = str(int(context.args[0]))
@@ -149,6 +237,7 @@ async def del_vip(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    register_user(user)
     photo_file_id = update.message.photo[-1].file_id
     
     await context.bot.send_photo(
@@ -166,18 +255,29 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text("✅ **تم استلام صورة الإشعار بنجاح!**\nجاري مراجعة التحويل وتفعيل حسابك كـ VIP في أقرب وقت.")
 
-# ==================== التنزيل ومعالجة الصوت والفيديو ====================
+# ==================== التنزيل ومعالجة الرسائل ====================
+
+async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # الفحص أولاً إذا كانت الرسالة ضغطة زر من أزرار الأدمن الثابتة
+    is_admin_button = await handle_admin_buttons(update, context)
+    if is_admin_button:
+        return
+
+    # إذا لم تكن زر أدمن، يتعامل معها البوت كرابط تنزيل
+    url = update.message.text
+    await download_and_send(update, context, url)
 
 async def download_audio(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str):
     query = update.callback_query
-    user_id = update.effective_user.id
+    user = update.effective_user
+    register_user(user)
     msg = await query.message.reply_text("🎧 جاري استخراج الصوت MP3...")
 
     try:
         ydl_opts = {
             'format': 'bestaudio/best',
             'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
-            'outtmpl': f'downloads/{user_id}_audio.%(ext)s',
+            'outtmpl': f'downloads/{user.id}_audio.%(ext)s',
             'quiet': True,
         }
         loop = asyncio.get_event_loop()
@@ -194,8 +294,9 @@ async def download_audio(update: Update, context: ContextTypes.DEFAULT_TYPE, url
         await msg.edit_text(f"⚠️ تعذر استخراج الصوت: {str(e)}")
 
 async def download_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE, url: str, is_hd: bool = False):
-    user_id = update.effective_user.id
-    is_vip = is_vip_active(user_id)
+    user = update.effective_user
+    register_user(user)
+    is_vip = is_vip_active(user.id)
     
     if update.message:
         msg = await update.message.reply_text("🔍 جاري فحص الرابط والتنزيل...")
@@ -205,7 +306,7 @@ async def download_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     format_setting = 'best[filesize<=150M]/best' if is_hd else 'best[filesize<=30M]/worst'
 
     try:
-        ydl_opts = {'format': format_setting, 'outtmpl': f'downloads/{user_id}_%(id)s.%(ext)s', 'quiet': True}
+        ydl_opts = {'format': format_setting, 'outtmpl': f'downloads/{user.id}_%(id)s.%(ext)s', 'quiet': True}
         loop = asyncio.get_event_loop()
         def download_process():
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -245,7 +346,8 @@ async def download_and_send(update: Update, context: ContextTypes.DEFAULT_TYPE, 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     data = query.data
-    user_id = query.from_user.id
+    user = query.from_user
+    register_user(user)
     await query.answer()
 
     if data == "vip_info":
@@ -256,7 +358,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• الحد الأقصى للملفات يصل إلى **150 ميجابايت**.\n"
             "• إمكانية تحويل أي مقطع فيديو إلى صوت MP3 بنقرة زر.\n\n"
             "------------------------------\n"
-            f"🆔 **الآيدي الخاص بك:** `{user_id}` *(اضغط عليه للنسخ)*\n\n"
+            f"🆔 **الآيدي الخاص بك:** `{user.id}` *(اضغط عليه للنسخ)*\n\n"
             "💳 **طرق الدفع والتفعيل:**\n"
             "1️⃣ **عبر تطبيق بنكك (Bankak):** اضغط على زر (التحويل بي بنكك) بالأسفل لفتح بيانات الحساب.\n"
             f"2️⃣ **عبر نجوم تلجرام (Telegram Stars):** بقيمة **{STARS_PRICE} نجمة ⭐️** (تفعيل تلقائي مائة بالمائة)\n\n"
@@ -284,14 +386,14 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("dl_hd_"):
         url = data.replace("dl_hd_", "")
-        if not is_vip_active(user_id):
+        if not is_vip_active(user.id):
             await query.message.reply_text("🔒 التحميل بجودة HD مخصص لمشتركي VIP فقط.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("👑 الاشتراك في VIP", callback_data="vip_info")]]))
         else:
             await download_and_send(update, context, url, is_hd=True)
 
     elif data.startswith("dl_mp3_"):
         url = data.replace("dl_mp3_", "")
-        if not is_vip_active(user_id):
+        if not is_vip_active(user.id):
             await query.message.reply_text("🔒 استخراج الصوت MP3 مخصص لمشتركي VIP فقط.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("👑 الاشتراك في VIP", callback_data="vip_info")]]))
         else:
             await download_audio(update, context, url)
@@ -310,12 +412,14 @@ def main():
     app_bot.add_handler(CommandHandler("start", start))
     app_bot.add_handler(CommandHandler("addvip", add_vip))
     app_bot.add_handler(CommandHandler("delvip", del_vip))
+    app_bot.add_handler(CommandHandler("stats", stats))
+    app_bot.add_handler(CommandHandler("users", list_users))
     
     app_bot.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-    app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, lambda u, c: download_and_send(u, c, u.message.text)))
+    app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
     app_bot.add_handler(CallbackQueryHandler(button_callback))
     
-    print("🚀 البوت يعمل وجاهز بكافة التعديلات...")
+    print("🚀 البوت يعمل وجاهز مع الكيبورد الثابت للأدمن بالعربية...")
     app_bot.run_polling()
 
 if __name__ == "__main__":
